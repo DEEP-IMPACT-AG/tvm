@@ -44,6 +44,7 @@ macro(find_llvm use_llvm)
   endif()
 
   if(${LLVM_CONFIG} MATCHES ${IS_TRUE_PATTERN})
+    hunter_add_package(LLVM)
     find_package(LLVM ${llvm_version_required} REQUIRED CONFIG)
     llvm_map_components_to_libnames(LLVM_LIBS "all")
     if (NOT LLVM_LIBS)
