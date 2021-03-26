@@ -3,7 +3,6 @@
 find_package(dlpack CONFIG REQUIRED)
 
 if(NOT "@TVM_BUILD_RUNTIME_ONLY@")
-  find_package(HalideIR CONFIG REQUIRED)
   find_package(rang CONFIG REQUIRED)
 endif()
 
