@@ -615,7 +615,7 @@ endif(INSTALL_DEV)
 
 # https://docs.tvm.ai/install/from_source.html#python-package-installation
 install(
-    DIRECTORY python/ topi/python/ nnvm/python/
+    DIRECTORY python/
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
     FILES_MATCHING
     PATTERN "*"
