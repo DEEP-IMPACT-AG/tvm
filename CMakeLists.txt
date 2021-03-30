@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.2)
-project(tvm C CXX)
+
+include("cmake/HunterGate.cmake")
+HunterGate(
+        URL "https://github.com/DEEP-IMPACT-AG/hunter/archive/refs/tags/v0.23.295.t12.tar.gz"
+        SHA1 "4f6e3a0a186d26f232f7191861691775b0e82624"
+
+)
+project(tvm VERSION 0.6)
+
+hunter_add_package(dmlc-core)
+find_package(dmlc CONFIG REQUIRED)
+
+hunter_add_package(dlpack)
+find_package(dlpack CONFIG REQUIRED)
 
 # Utility functions
 include(cmake/util/Util.cmake)
@@ -41,6 +54,8 @@ tvm_option(USE_RTTI "Build with RTTI" ON)
 tvm_option(USE_MSVC_MT "Build with MT" OFF)
 tvm_option(USE_MICRO "Build with Micro" OFF)
 tvm_option(INSTALL_DEV "Install compiler infrastructure" OFF)
+tvm_option(INSTALL_NNVM_SOURCES "Install NNVM sources" OFF)
+tvm_option(TVM_BUILD_RUNTIME_ONLY "Only build tvm_runtime library" OFF)
 tvm_option(HIDE_PRIVATE_SYMBOLS "Compile with -fvisibility=hidden." OFF)
 
 # 3rdparty libraries
@@ -67,11 +82,18 @@ tvm_option(USE_ANTLR "Build with ANTLR for Relay parsing" OFF)
 # include directories
 include_directories(${CMAKE_INCLUDE_PATH})
 include_directories("include")
+
+if(NOT HUNTER_ENABLED)
 include_directories(${DLPACK_PATH})
 include_directories(${DMLC_PATH})
 include_directories(${RANG_PATH})
-include_directories(${COMPILER_RT_PATH})
 include_directories(${PICOJSON_PATH})
+else()
+  include_directories(${DMLC-CORE_ROOT}/include)
+  include_directories(${DLPACK_ROOT}/include)
+endif()
+include_directories(${COMPILER_RT_PATH})
+
 
 # initial variables
 set(TVM_LINKER_LIBS "")
@@ -145,6 +167,24 @@ file(GLOB RELAY_BACKEND_SRCS
     src/relay/backend/*.cc
     src/relay/backend/vm/*.cc
     )
+
+if(INSTALL_NNVM_SOURCES)
+  file(GLOB_RECURSE x nnvm/src/c_api/*.cc nnvm/src/c_api/*.h)
+  install(FILES ${x} DESTINATION src/tvm/nnvm/c_api)
+
+  file(GLOB_RECURSE x nnvm/src/core/*.cc)
+  install(FILES ${x} DESTINATION src/tvm/nnvm/core)
+
+  file(GLOB_RECURSE x nnvm/src/pass/*.cc nnvm/src/pass/*.h)
+  install(FILES ${x} DESTINATION src/tvm/nnvm/pass)
+
+  file(GLOB_RECURSE x nnvm/src/compiler/*.cc nnvm/src/compiler/*.h)
+  install(FILES ${x} DESTINATION src/tvm/nnvm/compiler)
+
+  file(GLOB_RECURSE x nnvm/src/top/*.cc)
+  install(FILES ${x} DESTINATION src/tvm/nnvm/top)
+endif()
+
 file(GLOB_RECURSE RELAY_IR_SRCS
     src/relay/ir/*.cc
     )
@@ -271,8 +311,10 @@ if(NOT MSVC)
   endif()
 endif()
 
+if(NOT TVM_BUILD_RUNTIME_ONLY)
 add_library(tvm SHARED ${COMPILER_SRCS} ${RUNTIME_SRCS})
 add_library(tvm_topi SHARED ${TOPI_SRCS})
+endif()
 add_library(tvm_runtime SHARED ${RUNTIME_SRCS})
 
 
@@ -296,16 +338,21 @@ if(USE_THREADS)
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
-  target_link_libraries(tvm Threads::Threads)
-  target_link_libraries(tvm_topi Threads::Threads)
-  target_link_libraries(tvm_runtime Threads::Threads)
-  target_link_libraries(nnvm_compiler Threads::Threads)
+  target_link_libraries(tvm PUBLIC Threads::Threads)
+  target_link_libraries(tvm_topi PUBLIC Threads::Threads)
+  target_link_libraries(tvm_runtime PUBLIC Threads::Threads)
+  target_link_libraries(nnvm_compiler PUBLIC Threads::Threads)
 endif(USE_THREADS)
 
-target_link_libraries(tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
-target_link_libraries(tvm_topi tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
-target_link_libraries(tvm_runtime ${TVM_RUNTIME_LINKER_LIBS})
-target_link_libraries(nnvm_compiler tvm)
+if(NOT TVM_BUILD_RUNTIME_ONLY)
+target_link_libraries(tvm PUBLIC ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
+target_link_libraries(tvm_topi PUBLIC tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
+endif()
+target_link_libraries(tvm_runtime PUBLIC ${TVM_RUNTIME_LINKER_LIBS})
+if(NOT TVM_BUILD_RUNTIME_ONLY)
+target_link_libraries(nnvm_compiler PUBLIC tvm)
+
+target_link_libraries(tvm PUBLIC ${CMAKE_DL_LIBS})
 
 if (HIDE_PRIVATE_SYMBOLS AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(HIDE_SYMBOLS_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
@@ -318,17 +365,27 @@ if (HIDE_PRIVATE_SYMBOLS AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   target_link_libraries(nnvm_compiler ${HIDE_SYMBOLS_LINKER_FLAGS})
 endif()
 
+target_link_libraries(tvm PUBLIC dlpack::dlpack)
+
+hunter_add_package(rang)
+find_package(rang CONFIG REQUIRED)
+target_link_libraries(tvm PUBLIC rang::rang)
+
+endif()
+
+target_link_libraries(tvm_runtime PUBLIC dmlc::dmlc dlpack::dlpack)
+
 # Related headers
 target_include_directories(
-  tvm
-  PUBLIC "topi/include")
+        tvm
+        PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/topi/include>")
 target_include_directories(
-  tvm_topi
-  PUBLIC "topi/include")
+        tvm_topi
+        PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/topi/include>")
 target_include_directories(
-  nnvm_compiler
-  PUBLIC "nnvm/include"
-  PUBLIC "topi/include")
+        nnvm_compiler
+        PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/nnvm/include>"
+        PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/topi/include>")
 
 # Tests
 set(TEST_EXECS "")
@@ -360,16 +417,71 @@ elseif(NOT GTEST_LIB)
       COMMAND exit 1)
 endif()
 
+if(NOT TVM_BUILD_RUNTIME_ONLY)
 # Custom targets
 add_custom_target(runtime DEPENDS tvm_runtime)
+endif()
+
+### Installation (https://github.com/forexample/package-example) {
+
+# Introduce variables:
+# * CMAKE_INSTALL_LIBDIR
+# * CMAKE_INSTALL_BINDIR
+# * CMAKE_INSTALL_INCLUDEDIR
+include(GNUInstallDirs)
+
+set(config_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(version_config "${generated_dir}/${PROJECT_NAME}ConfigVersion.cmake")
+set(project_config "${generated_dir}/${PROJECT_NAME}Config.cmake")
+set(TARGETS_EXPORT_NAME "${PROJECT_NAME}Targets")
+set(namespace "${PROJECT_NAME}::")
+
+include(CMakePackageConfigHelpers)
+
+# Use:
+# * PROJECT_VERSION
+write_basic_package_version_file(
+        "${version_config}" COMPATIBILITY SameMajorVersion
+)
+
+# Use:
+# * TARGETS_EXPORT_NAME
+# * PROJECT_NAME
+configure_package_config_file(
+        "cmake/template/Config.cmake.in"
+        "${project_config}"
+        INSTALL_DESTINATION "${config_install_dir}"
+)
+
+install(
+        FILES "${project_config}" "${version_config}"
+        DESTINATION "${config_install_dir}"
+)
+
+install(
+        EXPORT "${TARGETS_EXPORT_NAME}"
+        NAMESPACE "${namespace}"
+        DESTINATION "${config_install_dir}"
+)
+
+### }
 
 # Installation rules
-install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
-install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
-install(TARGETS tvm_runtime DESTINATION lib${LIB_SUFFIX})
-install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
+install(TARGETS tvm_runtime EXPORT "${TARGETS_EXPORT_NAME}" DESTINATION lib${LIB_SUFFIX})
+if(NOT TVM_BUILD_RUNTIME_ONLY)
+install(TARGETS tvm EXPORT "${TARGETS_EXPORT_NAME}" DESTINATION lib${LIB_SUFFIX})
+install(TARGETS nnvm_compiler EXPORT "${TARGETS_EXPORT_NAME}" DESTINATION lib${LIB_SUFFIX})
+endif()
+
+if(TARGET vta)
+  install(TARGETS vta EXPORT "${TARGETS_EXPORT_NAME}" DESTINATION lib${LIB_SUFFIX})
+endif()
 
 if (INSTALL_DEV)
+  if(NOT TVM_BUILD_RUNTIME_ONLY)
+    install(TARGETS tvm_topi EXPORT "${TARGETS_EXPORT_NAME}" DESTINATION lib${LIB_SUFFIX})
+  endif()
   install(
     DIRECTORY "include/." DESTINATION "include"
     FILES_MATCHING
@@ -403,9 +515,23 @@ else(INSTALL_DEV)
     )
 endif(INSTALL_DEV)
 
+# https://docs.tvm.ai/install/from_source.html#python-package-installation
+install(
+        DIRECTORY python/
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
+        FILES_MATCHING
+        PATTERN "*"
+        REGEX "\.gitignore$" EXCLUDE
+        REGEX "setup\.py$" EXCLUDE
+)
+
 # More target definitions
 if(MSVC)
+  if(NOT TVM_BUILD_RUNTIME_ONLY)
   target_compile_definitions(tvm PRIVATE -DTVM_EXPORTS)
+  endif()
   target_compile_definitions(tvm_runtime PRIVATE -DTVM_EXPORTS)
+  if(NOT TVM_BUILD_RUNTIME_ONLY)
   target_compile_definitions(nnvm_compiler PRIVATE -DNNVM_EXPORTS)
+  endif()
 endif()
